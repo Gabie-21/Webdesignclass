@@ -330,6 +330,59 @@
             transform: translateY(0);
         }
 
+        .undo-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(45deg, #ff9800, #f57c00);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .undo-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(255, 152, 0, 0.4);
+        }
+
+        .undo-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .undo-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.6s;
+        }
+
+        .undo-btn:hover:not(:disabled)::before {
+            left: 100%;
+        }
+
+        .history-indicator {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 5px;
+            animation: pulse 2s infinite;
+        }
+
         .error-message {
             background: linear-gradient(45deg, #ff6b6b, #ff5252);
             color: white;
@@ -459,7 +512,7 @@
         }
 
         .insights-panel {
-            background: rgba(80, 133, 247, 0.95);
+            background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
             padding: 25px;
             margin-top: 20px;
@@ -581,6 +634,9 @@
                         <button type="submit" class="submit-btn">
                             <span id="btnText">🚀 Book Pod</span>
                         </button>
+                        <button type="button" id="undoBtn" class="undo-btn" onclick="handleUndo()">
+                            ↶ Undo Last (0)
+                        </button>
                     </form>
 
                     <div id="errors" class="error-message"></div>
@@ -609,13 +665,13 @@
 
     <script>
         /*
-         * Enhanced Interactive Features:
-         * - Variables & data types: objects for tracking animations, arrays for time slots
+         * Enhanced Interactive Features with Undo Functionality:
+         * - Variables & data types: objects for tracking animations, arrays for time slots, stack for undo history
          * - Control structures: complex if/else chains for visual states, switch for animations
          * - Loops: for loops creating particles, rendering grids, calculating fill rates
-         * - Functions: modular animation functions, visual feedback handlers
-         * - Events: hover effects, click animations, real-time updates
-         * - DOM manipulation: dynamic particle creation, grid rendering, tooltip generation
+         * - Functions: modular animation functions, visual feedback handlers, undo operations
+         * - Events: hover effects, click animations, real-time updates, undo button handling
+         * - DOM manipulation: dynamic particle creation, grid rendering, tooltip generation, undo state updates
          */
 
         // Enhanced data structures with visual state tracking
@@ -642,6 +698,10 @@
         var duplicateAttempts = 0;
         var selectedPod = null;
         var animationQueue = [];
+
+        // Undo functionality - stack to track booking history
+        var bookingHistoryStack = [];
+        var maxHistorySize = 10; // Limit stack size to prevent memory issues
 
         // Visual Animation Functions
 
@@ -716,6 +776,7 @@
         }
 
         function findBooking(podId, timeString) {
+            // Using === for strict equality to avoid type coercion issues with string comparison
             for (var i = 0; i < bookings.length; i++) {
                 if (bookings[i].podId === podId && bookings[i].time === timeString) {
                     return bookings[i];
@@ -740,6 +801,89 @@
         function customRound(number, decimals) {
             var multiplier = Math.pow(10, decimals);
             return Math.round(number * multiplier) / multiplier;
+        }
+
+        function addToHistory(booking) {
+            // Add booking to history stack with deep copy to avoid reference issues
+            var bookingCopy = {
+                podId: booking.podId,
+                time: booking.time,
+                students: booking.students.slice(), // Create copy of students array
+                timestamp: new Date().toISOString()
+            };
+
+            bookingHistoryStack.push(bookingCopy);
+
+            // Limit stack size - remove oldest entries if exceeded
+            if (bookingHistoryStack.length > maxHistorySize) {
+                bookingHistoryStack.shift(); // Remove first (oldest) item
+            }
+
+            updateUndoButtonState();
+        }
+
+        function undoLastBooking() {
+            if (bookingHistoryStack.length === 0) {
+                showNotification('No bookings to undo', 'error');
+                return false;
+            }
+
+            var lastBooking = bookingHistoryStack.pop();
+
+            // Find and remove the booking from main bookings array
+            for (var i = bookings.length - 1; i >= 0; i--) {
+                if (bookings[i].podId === lastBooking.podId &&
+                    bookings[i].time === lastBooking.time) {
+
+                    // Check if it's an exact match (same students)
+                    var studentsMatch = true;
+                    if (bookings[i].students.length === lastBooking.students.length) {
+                        for (var j = 0; j < lastBooking.students.length; j++) {
+                            var studentFound = false;
+                            for (var k = 0; k < bookings[i].students.length; k++) {
+                                if (bookings[i].students[k] === lastBooking.students[j]) {
+                                    studentFound = true;
+                                    break;
+                                }
+                            }
+                            if (!studentFound) {
+                                studentsMatch = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        studentsMatch = false;
+                    }
+
+                    if (studentsMatch) {
+                        bookings.splice(i, 1);
+                        updateUndoButtonState();
+                        return true;
+                    }
+                }
+            }
+
+            // If booking not found, put it back in history
+            bookingHistoryStack.push(lastBooking);
+            showNotification('Booking not found for undo', 'error');
+            return false;
+        }
+
+        function updateUndoButtonState() {
+            var undoBtn = document.getElementById('undoBtn');
+            if (undoBtn) {
+                if (bookingHistoryStack.length > 0) {
+                    undoBtn.disabled = false;
+                    undoBtn.style.opacity = '1';
+                    undoBtn.style.cursor = 'pointer';
+                    undoBtn.innerHTML = `↶ Undo Last (${bookingHistoryStack.length})`;
+                } else {
+                    undoBtn.disabled = true;
+                    undoBtn.style.opacity = '0.5';
+                    undoBtn.style.cursor = 'not-allowed';
+                    undoBtn.innerHTML = '↶ Undo Last (0)';
+                }
+            }
         }
 
         function validateBooking(podId, timeString, studentIds) {
@@ -1098,17 +1242,32 @@
 
             // Add or update booking
             var existingBooking = findBooking(podId, timeString);
+            var newBooking;
+
             if (existingBooking) {
+                // Store the original state before modification for undo
+                var originalStudents = existingBooking.students.slice();
                 for (var i = 0; i < studentIds.length; i++) {
                     existingBooking.students.push(studentIds[i]);
                 }
-            } else {
-                bookings.push({
+
+                // Create booking object for history (only the new students added)
+                newBooking = {
                     podId: podId,
                     time: timeString,
                     students: studentIds
-                });
+                };
+            } else {
+                newBooking = {
+                    podId: podId,
+                    time: timeString,
+                    students: studentIds
+                };
+                bookings.push(newBooking);
             }
+
+            // Add to undo history
+            addToHistory(newBooking);
 
             // Success feedback
             clearMessages();
@@ -1129,6 +1288,30 @@
                 renderTimeGrid();
                 renderInsights();
             }, 300);
+        }
+
+        function handleUndo() {
+            var undoBtn = document.getElementById('undoBtn');
+
+            // Visual feedback
+            undoBtn.style.transform = 'scale(0.95)';
+            setTimeout(function () {
+                undoBtn.style.transform = '';
+            }, 150);
+
+            var success = undoLastBooking();
+
+            if (success) {
+                showNotification('✨ Last booking undone successfully!', 'success');
+                showSuccess('Last booking has been removed');
+
+                // Re-render with animations
+                setTimeout(function () {
+                    renderPodGrid();
+                    renderTimeGrid();
+                    renderInsights();
+                }, 200);
+            }
         }
 
         function handleSlotClick(event) {
@@ -1174,6 +1357,9 @@
             // Set up event listeners
             document.getElementById('bookingForm').addEventListener('submit', handleFormSubmit);
             document.getElementById('timeGrid').addEventListener('click', handleSlotClick);
+
+            // Initialize undo button state
+            updateUndoButtonState();
 
             // Add hover effects to form inputs
             var inputs = document.querySelectorAll('input, select');
@@ -1227,6 +1413,7 @@
             document.addEventListener('DOMContentLoaded', initApp);
         } else {
             initApp();
+            startRealTimeUpdates();
         }
     </script>
 </body>
